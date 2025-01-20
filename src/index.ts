@@ -6,6 +6,11 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { NotesService, NoteFilter } from './notes.js';
 import { RemindersService, ReminderFilter, Reminder } from './reminder.js';
 import { CalendarService, CalendarEventFilter } from './calendar.js';
+import { Logger } from './shared.js';
+
+// Enable debug mode by default for server logging
+const logger = Logger.getInstance();
+logger.setDebugMode(true);
 
 /**
  * Create an MCP server with capabilities for resources (to list/read notes),
@@ -28,8 +33,9 @@ const server = new Server(
 /**
  * Handler that lists available tools.
  */
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
+server.setRequestHandler(ListToolsRequestSchema, async (request) => {
+  await logger.log('Received ListTools request', request);
+  const response = {
     tools: [
       {
         name: 'list_reminders',
@@ -445,357 +451,388 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
     ],
   };
+  await logger.log('Sending ListTools response', response);
+  return response;
 });
 
 /**
  * Handler for tool calls
  */
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const remindersService = RemindersService.getInstance();
-  const notesService = NotesService.getInstance();
-  const calendarService = CalendarService.getInstance();
+  await logger.log('Received CallTool request', { 
+    tool: request.params.name,
+    arguments: request.params.arguments
+  });
 
-  switch (request.params.name) {
-    case 'list_reminders': {
-      const filter: ReminderFilter = {
-        completed: request.params.arguments?.completed as boolean | undefined,
-        flagged: request.params.arguments?.flagged as boolean | undefined,
-        priority: request.params.arguments?.priority as number | undefined,
-        dueAfter: request.params.arguments?.dueAfter ? new Date(request.params.arguments.dueAfter as string) : undefined,
-        dueBefore: request.params.arguments?.dueBefore ? new Date(request.params.arguments.dueBefore as string) : undefined,
-      };
+  try {
+    const remindersService = RemindersService.getInstance();
+    const notesService = NotesService.getInstance();
+    const calendarService = CalendarService.getInstance();
 
-      const reminders = await remindersService.listReminders(filter);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Found ${reminders.length} reminders:\n${reminders
-              .map(
-                (r) =>
-                  `- ${r.name} (${r.completed ? 'completed' : 'pending'}${r.flagged ? ', flagged' : ''}${
-                    r.priority > 0 ? `, priority ${r.priority}` : ''
-                  })`,
-              )
-              .join('\n')}`,
-          },
-        ],
-      };
-    }
+    let response;
+    switch (request.params.name) {
+      case 'list_reminders': {
+        const filter: ReminderFilter = {
+          completed: request.params.arguments?.completed as boolean | undefined,
+          flagged: request.params.arguments?.flagged as boolean | undefined,
+          priority: request.params.arguments?.priority as number | undefined,
+          dueAfter: request.params.arguments?.dueAfter ? new Date(request.params.arguments.dueAfter as string) : undefined,
+          dueBefore: request.params.arguments?.dueBefore ? new Date(request.params.arguments.dueBefore as string) : undefined,
+        };
 
-    case 'create_reminder': {
-      const title = String(request.params.arguments?.title);
-      const content = String(request.params.arguments?.content);
-      if (!title || !content) {
-        throw new Error('Title and content are required');
+        const reminders = await remindersService.listReminders(filter);
+        response = {
+          content: [
+            {
+              type: 'text',
+              text: `Found ${reminders.length} reminders:\n${reminders
+                .map(
+                  (r) =>
+                    `- ${r.name} (${r.completed ? 'completed' : 'pending'}${r.flagged ? ', flagged' : ''}${
+                      r.priority > 0 ? `, priority ${r.priority}` : ''
+                    })`,
+                )
+                .join('\n')}`,
+            },
+          ],
+        };
+        break;
       }
 
-      const reminder = await remindersService.createReminder(title, content);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Created reminder ${reminder.id}: ${reminder.name}`,
-          },
-        ],
-      };
-    }
+      case 'create_reminder': {
+        const title = String(request.params.arguments?.title);
+        const content = String(request.params.arguments?.content);
+        if (!title || !content) {
+          throw new Error('Title and content are required');
+        }
 
-    case 'update_reminder': {
-      const id = String(request.params.arguments?.id);
-      if (!id) {
-        throw new Error('Reminder ID is required');
+        const reminder = await remindersService.createReminder(title, content);
+        response = {
+          content: [
+            {
+              type: 'text',
+              text: `Created reminder ${reminder.id}: ${reminder.name}`,
+            },
+          ],
+        };
+        break;
       }
 
-      const updates: Partial<Omit<Reminder, 'id'>> = {
-        name: request.params.arguments?.name as string | undefined,
-        body: request.params.arguments?.body as string | undefined,
-        completed: request.params.arguments?.completed as boolean | undefined,
-        priority: request.params.arguments?.priority as number | undefined,
-        flagged: request.params.arguments?.flagged as boolean | undefined,
-        dueDate: request.params.arguments?.dueDate ? new Date(request.params.arguments.dueDate as string) : undefined,
-        remindMeDate: request.params.arguments?.remindMeDate ? new Date(request.params.arguments.remindMeDate as string) : undefined,
-      };
+      case 'update_reminder': {
+        const id = String(request.params.arguments?.id);
+        if (!id) {
+          throw new Error('Reminder ID is required');
+        }
 
-      const reminder = await remindersService.updateReminder(id, updates);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Updated reminder ${reminder.id}: ${reminder.name}`,
-          },
-        ],
-      };
-    }
+        const updates: Partial<Omit<Reminder, 'id'>> = {
+          name: request.params.arguments?.name as string | undefined,
+          body: request.params.arguments?.body as string | undefined,
+          completed: request.params.arguments?.completed as boolean | undefined,
+          priority: request.params.arguments?.priority as number | undefined,
+          flagged: request.params.arguments?.flagged as boolean | undefined,
+          dueDate: request.params.arguments?.dueDate ? new Date(request.params.arguments.dueDate as string) : undefined,
+          remindMeDate: request.params.arguments?.remindMeDate ? new Date(request.params.arguments.remindMeDate as string) : undefined,
+        };
 
-    case 'complete_reminder': {
-      const id = String(request.params.arguments?.id);
-      if (!id) {
-        throw new Error('Reminder ID is required');
+        const reminder = await remindersService.updateReminder(id, updates);
+        response = {
+          content: [
+            {
+              type: 'text',
+              text: `Updated reminder ${reminder.id}: ${reminder.name}`,
+            },
+          ],
+        };
+        break;
       }
 
-      const reminder = await remindersService.completeReminder(id);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Marked reminder ${reminder.id}: ${reminder.name} as completed`,
-          },
-        ],
-      };
-    }
+      case 'complete_reminder': {
+        const id = String(request.params.arguments?.id);
+        if (!id) {
+          throw new Error('Reminder ID is required');
+        }
 
-    case 'flag_reminder': {
-      const id = String(request.params.arguments?.id);
-      const flagged = Boolean(request.params.arguments?.flagged);
-      if (!id) {
-        throw new Error('Reminder ID is required');
+        const reminder = await remindersService.completeReminder(id);
+        response = {
+          content: [
+            {
+              type: 'text',
+              text: `Marked reminder ${reminder.id}: ${reminder.name} as completed`,
+            },
+          ],
+        };
+        break;
       }
 
-      const reminder = await remindersService.flagReminder(id, flagged);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `${flagged ? 'Flagged' : 'Unflagged'} reminder ${reminder.id}: ${reminder.name}`,
-          },
-        ],
-      };
-    }
+      case 'flag_reminder': {
+        const id = String(request.params.arguments?.id);
+        const flagged = Boolean(request.params.arguments?.flagged);
+        if (!id) {
+          throw new Error('Reminder ID is required');
+        }
 
-    case 'set_reminder_priority': {
-      const id = String(request.params.arguments?.id);
-      const priority = Number(request.params.arguments?.priority);
-      if (!id) {
-        throw new Error('Reminder ID is required');
+        const reminder = await remindersService.flagReminder(id, flagged);
+        response = {
+          content: [
+            {
+              type: 'text',
+              text: `${flagged ? 'Flagged' : 'Unflagged'} reminder ${reminder.id}: ${reminder.name}`,
+            },
+          ],
+        };
+        break;
       }
 
-      const reminder = await remindersService.setPriority(id, priority);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Set priority of reminder ${reminder.id}: ${reminder.name} to ${priority}`,
-          },
-        ],
-      };
-    }
+      case 'set_reminder_priority': {
+        const id = String(request.params.arguments?.id);
+        const priority = Number(request.params.arguments?.priority);
+        if (!id) {
+          throw new Error('Reminder ID is required');
+        }
 
-    case 'list_notes': {
-      const filter: NoteFilter = {
-        name: request.params.arguments?.name as string | undefined,
-        body: request.params.arguments?.body as string | undefined,
-        createdAfter: request.params.arguments?.createdAfter ? new Date(request.params.arguments.createdAfter as string) : undefined,
-        createdBefore: request.params.arguments?.createdBefore ? new Date(request.params.arguments.createdBefore as string) : undefined,
-        modifiedAfter: request.params.arguments?.modifiedAfter ? new Date(request.params.arguments.modifiedAfter as string) : undefined,
-        modifiedBefore: request.params.arguments?.modifiedBefore ? new Date(request.params.arguments.modifiedBefore as string) : undefined,
-        containerId: request.params.arguments?.containerId as string | undefined,
-        containerName: request.params.arguments?.containerName as string | undefined,
-      };
-
-      const notes = await notesService.listNotes(filter);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Found ${notes.length} notes:\n${notes
-              .map(
-                (n) =>
-                  `- ${n.name} (in ${n.container.name}, created ${n.creationDate.toLocaleDateString()}, modified ${n.modificationDate.toLocaleDateString()})`,
-              )
-              .join('\n')}`,
-          },
-        ],
-      };
-    }
-
-    case 'create_note': {
-      const title = String(request.params.arguments?.title);
-      const content = String(request.params.arguments?.content);
-      const containerName = request.params.arguments?.containerName as string | undefined;
-
-      if (!title || !content) {
-        throw new Error('Title and content are required');
+        const reminder = await remindersService.setPriority(id, priority);
+        response = {
+          content: [
+            {
+              type: 'text',
+              text: `Set priority of reminder ${reminder.id}: ${reminder.name} to ${priority}`,
+            },
+          ],
+        };
+        break;
       }
 
-      const note = await notesService.createNote(title, content, containerName);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Created note "${note.name}" in ${note.container.name}`,
-          },
-        ],
-      };
-    }
+      case 'list_notes': {
+        const filter: NoteFilter = {
+          name: request.params.arguments?.name as string | undefined,
+          body: request.params.arguments?.body as string | undefined,
+          createdAfter: request.params.arguments?.createdAfter ? new Date(request.params.arguments.createdAfter as string) : undefined,
+          createdBefore: request.params.arguments?.createdBefore ? new Date(request.params.arguments.createdBefore as string) : undefined,
+          modifiedAfter: request.params.arguments?.modifiedAfter ? new Date(request.params.arguments.modifiedAfter as string) : undefined,
+          modifiedBefore: request.params.arguments?.modifiedBefore ? new Date(request.params.arguments.modifiedBefore as string) : undefined,
+          containerId: request.params.arguments?.containerId as string | undefined,
+          containerName: request.params.arguments?.containerName as string | undefined,
+        };
 
-    case 'update_note': {
-      const id = String(request.params.arguments?.id);
-      if (!id) {
-        throw new Error('Note ID is required');
+        const notes = await notesService.listNotes(filter);
+        response = {
+          content: [
+            {
+              type: 'text',
+              text: `Found ${notes.length} notes:\n${notes
+                .map(
+                  (n) =>
+                    `- ${n.name} (in ${n.container.name}, created ${n.creationDate.toLocaleDateString()}, modified ${n.modificationDate.toLocaleDateString()})`,
+                )
+                .join('\n')}`,
+            },
+          ],
+        };
+        break;
       }
 
-      const updates = {
-        name: request.params.arguments?.title as string | undefined,
-        body: request.params.arguments?.content as string | undefined,
-      };
+      case 'create_note': {
+        const title = String(request.params.arguments?.title);
+        const content = String(request.params.arguments?.content);
+        const containerName = request.params.arguments?.containerName as string | undefined;
 
-      const note = await notesService.updateNote(id, updates);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Updated note "${note.name}" in ${note.container.name}`,
-          },
-        ],
-      };
-    }
+        if (!title || !content) {
+          throw new Error('Title and content are required');
+        }
 
-    case 'list_note_folders': {
-      const folders = await notesService.listFolders();
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Found ${folders.length} folders:\n${folders.map((f) => `- ${f.name}`).join('\n')}`,
-          },
-        ],
-      };
-    }
-
-    case 'list_events': {
-      const filter: CalendarEventFilter = {
-        name: request.params.arguments?.name as string | undefined,
-        body: request.params.arguments?.body as string | undefined,
-        startAfter: request.params.arguments?.startAfter ? new Date(request.params.arguments.startAfter as string) : undefined,
-        startBefore: request.params.arguments?.startBefore ? new Date(request.params.arguments.startBefore as string) : undefined,
-        endAfter: request.params.arguments?.endAfter ? new Date(request.params.arguments.endAfter as string) : undefined,
-        endBefore: request.params.arguments?.endBefore ? new Date(request.params.arguments.endBefore as string) : undefined,
-        calendarId: request.params.arguments?.calendarId as string | undefined,
-        calendarName: request.params.arguments?.calendarName as string | undefined,
-        status: request.params.arguments?.status as 'cancelled' | 'confirmed' | 'none' | 'tentative' | undefined,
-        location: request.params.arguments?.location as string | undefined,
-      };
-
-      const events = await calendarService.listEvents(filter);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Found ${events.length} events:\n${events
-              .map(
-                (e) =>
-                  `- ${e.summary} (in ${e.calendar.name}, ${e.startDate.toLocaleString()} - ${e.endDate.toLocaleString()})${
-                    e.location ? ` at ${e.location}` : ''
-                  }`,
-              )
-              .join('\n')}`,
-          },
-        ],
-      };
-    }
-
-    case 'create_event': {
-      const calendarName = String(request.params.arguments?.calendarName);
-      const summary = String(request.params.arguments?.summary);
-      const startDate = new Date(String(request.params.arguments?.startDate));
-      const endDate = new Date(String(request.params.arguments?.endDate));
-      const alldayEvent = Boolean(request.params.arguments?.alldayEvent);
-
-      if (!calendarName || !summary || !startDate || !endDate) {
-        throw new Error('Calendar name, summary, start date, and end date are required');
+        const note = await notesService.createNote(title, content, containerName);
+        response = {
+          content: [
+            {
+              type: 'text',
+              text: `Created note "${note.name}" in ${note.container.name}`,
+            },
+          ],
+        };
+        break;
       }
 
-      const options = {
-        description: request.params.arguments?.description as string | undefined,
-        location: request.params.arguments?.location as string | undefined,
-        url: request.params.arguments?.url as string | undefined,
-        recurrence: request.params.arguments?.recurrence as string | undefined,
-      };
+      case 'update_note': {
+        const id = String(request.params.arguments?.id);
+        if (!id) {
+          throw new Error('Note ID is required');
+        }
 
-      const event = await calendarService.createEvent(calendarName, summary, startDate, endDate, alldayEvent, options);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Created event "${event.summary}" in ${event.calendar.name} (${event.startDate.toLocaleString()} - ${event.endDate.toLocaleString()})`,
-          },
-        ],
-      };
-    }
+        const updates = {
+          name: request.params.arguments?.title as string | undefined,
+          body: request.params.arguments?.content as string | undefined,
+        };
 
-    case 'update_event': {
-      const id = String(request.params.arguments?.id);
-      if (!id) {
-        throw new Error('Event ID is required');
+        const note = await notesService.updateNote(id, updates);
+        response = {
+          content: [
+            {
+              type: 'text',
+              text: `Updated note "${note.name}" in ${note.container.name}`,
+            },
+          ],
+        };
+        break;
       }
 
-      const updates = {
-        summary: request.params.arguments?.summary as string | undefined,
-        startDate: request.params.arguments?.startDate ? new Date(request.params.arguments.startDate as string) : undefined,
-        endDate: request.params.arguments?.endDate ? new Date(request.params.arguments.endDate as string) : undefined,
-        alldayEvent: request.params.arguments?.alldayEvent as boolean | undefined,
-        description: request.params.arguments?.description as string | undefined,
-        location: request.params.arguments?.location as string | undefined,
-        url: request.params.arguments?.url as string | undefined,
-        recurrence: request.params.arguments?.recurrence as string | undefined,
-        status: request.params.arguments?.status as 'cancelled' | 'confirmed' | 'none' | 'tentative' | undefined,
-      };
-
-      const event = await calendarService.updateEvent(id, updates);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Updated event "${event.summary}" in ${event.calendar.name} (${event.startDate.toLocaleString()} - ${event.endDate.toLocaleString()})`,
-          },
-        ],
-      };
-    }
-
-    case 'find_conflicts': {
-      const startDate = new Date(String(request.params.arguments?.startDate));
-      const endDate = new Date(String(request.params.arguments?.endDate));
-      const calendarNames = request.params.arguments?.calendarNames as string[] | undefined;
-
-      if (!startDate || !endDate) {
-        throw new Error('Start date and end date are required');
+      case 'list_note_folders': {
+        const folders = await notesService.listFolders();
+        response = {
+          content: [
+            {
+              type: 'text',
+              text: `Found ${folders.length} folders:\n${folders.map((f) => `- ${f.name}`).join('\n')}`,
+            },
+          ],
+        };
+        break;
       }
 
-      const events = await calendarService.findConflicts(startDate, endDate, calendarNames);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Found ${events.length} conflicting events:\n${events
-              .map(
-                (e) =>
-                  `- ${e.summary} (in ${e.calendar.name}, ${e.startDate.toLocaleString()} - ${e.endDate.toLocaleString()})${
-                    e.location ? ` at ${e.location}` : ''
-                  }`,
-              )
-              .join('\n')}`,
-          },
-        ],
-      };
+      case 'list_events': {
+        const filter: CalendarEventFilter = {
+          name: request.params.arguments?.name as string | undefined,
+          body: request.params.arguments?.body as string | undefined,
+          startAfter: request.params.arguments?.startAfter ? new Date(request.params.arguments.startAfter as string) : undefined,
+          startBefore: request.params.arguments?.startBefore ? new Date(request.params.arguments.startBefore as string) : undefined,
+          endAfter: request.params.arguments?.endAfter ? new Date(request.params.arguments.endAfter as string) : undefined,
+          endBefore: request.params.arguments?.endBefore ? new Date(request.params.arguments.endBefore as string) : undefined,
+          calendarId: request.params.arguments?.calendarId as string | undefined,
+          calendarName: request.params.arguments?.calendarName as string | undefined,
+          status: request.params.arguments?.status as 'cancelled' | 'confirmed' | 'none' | 'tentative' | undefined,
+          location: request.params.arguments?.location as string | undefined,
+        };
+
+        const events = await calendarService.listEvents(filter);
+        response = {
+          content: [
+            {
+              type: 'text',
+              text: `Found ${events.length} events:\n${events
+                .map(
+                  (e) =>
+                    `- ${e.summary} (in ${e.calendar.name}, ${e.startDate.toLocaleString()} - ${e.endDate.toLocaleString()})${
+                      e.location ? ` at ${e.location}` : ''
+                    }`,
+                )
+                .join('\n')}`,
+            },
+          ],
+        };
+        break;
+      }
+
+      case 'create_event': {
+        const calendarName = String(request.params.arguments?.calendarName);
+        const summary = String(request.params.arguments?.summary);
+        const startDate = new Date(String(request.params.arguments?.startDate));
+        const endDate = new Date(String(request.params.arguments?.endDate));
+        const alldayEvent = Boolean(request.params.arguments?.alldayEvent);
+
+        if (!calendarName || !summary || !startDate || !endDate) {
+          throw new Error('Calendar name, summary, start date, and end date are required');
+        }
+
+        const options = {
+          description: request.params.arguments?.description as string | undefined,
+          location: request.params.arguments?.location as string | undefined,
+          url: request.params.arguments?.url as string | undefined,
+          recurrence: request.params.arguments?.recurrence as string | undefined,
+        };
+
+        const event = await calendarService.createEvent(calendarName, summary, startDate, endDate, alldayEvent, options);
+        response = {
+          content: [
+            {
+              type: 'text',
+              text: `Created event "${event.summary}" in ${event.calendar.name} (${event.startDate.toLocaleString()} - ${event.endDate.toLocaleString()})`,
+            },
+          ],
+        };
+        break;
+      }
+
+      case 'update_event': {
+        const id = String(request.params.arguments?.id);
+        if (!id) {
+          throw new Error('Event ID is required');
+        }
+
+        const updates = {
+          summary: request.params.arguments?.summary as string | undefined,
+          startDate: request.params.arguments?.startDate ? new Date(request.params.arguments.startDate as string) : undefined,
+          endDate: request.params.arguments?.endDate ? new Date(request.params.arguments.endDate as string) : undefined,
+          alldayEvent: request.params.arguments?.alldayEvent as boolean | undefined,
+          description: request.params.arguments?.description as string | undefined,
+          location: request.params.arguments?.location as string | undefined,
+          url: request.params.arguments?.url as string | undefined,
+          recurrence: request.params.arguments?.recurrence as string | undefined,
+          status: request.params.arguments?.status as 'cancelled' | 'confirmed' | 'none' | 'tentative' | undefined,
+        };
+
+        const event = await calendarService.updateEvent(id, updates);
+        response = {
+          content: [
+            {
+              type: 'text',
+              text: `Updated event "${event.summary}" in ${event.calendar.name} (${event.startDate.toLocaleString()} - ${event.endDate.toLocaleString()})`,
+            },
+          ],
+        };
+        break;
+      }
+
+      case 'find_conflicts': {
+        const startDate = new Date(String(request.params.arguments?.startDate));
+        const endDate = new Date(String(request.params.arguments?.endDate));
+        const calendarNames = request.params.arguments?.calendarNames as string[] | undefined;
+
+        if (!startDate || !endDate) {
+          throw new Error('Start date and end date are required');
+        }
+
+        const events = await calendarService.findConflicts(startDate, endDate, calendarNames);
+        response = {
+          content: [
+            {
+              type: 'text',
+              text: `Found ${events.length} conflicting events:\n${events
+                .map(
+                  (e) =>
+                    `- ${e.summary} (in ${e.calendar.name}, ${e.startDate.toLocaleString()} - ${e.endDate.toLocaleString()})${
+                      e.location ? ` at ${e.location}` : ''
+                    }`,
+                )
+                .join('\n')}`,
+            },
+          ],
+        };
+        break;
+      }
+
+      case 'list_calendars': {
+        const calendars = await calendarService.listCalendars();
+        response = {
+          content: [
+            {
+              type: 'text',
+              text: `Found ${calendars.length} calendars:\n${calendars
+                .map((c) => `- ${c.name}${c.description ? ` (${c.description})` : ''}${c.writable ? '' : ' (read-only)'}`)
+                .join('\n')}`,
+            },
+          ],
+        };
+        break;
+      }
+
+      default:
+        throw new Error('Unknown tool');
     }
 
-    case 'list_calendars': {
-      const calendars = await calendarService.listCalendars();
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Found ${calendars.length} calendars:\n${calendars
-              .map((c) => `- ${c.name}${c.description ? ` (${c.description})` : ''}${c.writable ? '' : ' (read-only)'}`)
-              .join('\n')}`,
-          },
-        ],
-      };
-    }
-
-    default:
-      throw new Error('Unknown tool');
+    await logger.log('Sending CallTool response', response);
+    return response;
+  } catch (error) {
+    await logger.logError(error, `Error in tool ${request.params.name}`);
+    throw error;
   }
 });
 
@@ -804,11 +841,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
  * This allows the server to communicate via standard input/output streams.
  */
 async function main() {
+  await logger.log('Starting MCP Apple Productive Suite server');
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
 
-main().catch((error) => {
-  console.error('Server error:', error);
+main().catch(async (error) => {
+  await logger.logError(error, 'Server startup error');
   process.exit(1);
 });

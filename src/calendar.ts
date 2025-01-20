@@ -1,6 +1,6 @@
 import '@jxa/global-type';
 import { run } from '@jxa/run';
-import { BaseFilter, BaseObject, JXAContainer, JXAObject, SingletonService } from './shared.js';
+import { BaseFilter, BaseObject, JXAContainer, JXAObject, SingletonService, Logger } from './shared.js';
 
 export interface Calendar extends BaseObject {
   description: string;
@@ -78,25 +78,33 @@ interface JXACalendar extends JXAContainer<JXACalendarEvent> {
 }
 
 export class CalendarService extends SingletonService<CalendarEvent> {
-  protected convertFromJXA(jxaObject: JXACalendarEvent): CalendarEvent {
-    const calendar = jxaObject.calendar();
+  private logger: Logger;
+
+  constructor() {
+    super();
+    this.logger = Logger.getInstance();
+  }
+
+  protected convertFromJXA(jxaObject: JXAObject): CalendarEvent {
+    const event = jxaObject as unknown as JXACalendarEvent;
+    const calendar = event.calendar();
     return {
-      id: jxaObject.getId(),
-      name: jxaObject.getName(),
-      body: jxaObject.getBody(),
-      description: jxaObject.getDescription(),
-      startDate: jxaObject.getStartDate(),
-      endDate: jxaObject.getEndDate(),
-      alldayEvent: jxaObject.getAllDayEvent(),
-      recurrence: jxaObject.getRecurrence(),
-      sequence: jxaObject.getSequence(),
-      stampDate: jxaObject.getStampDate(),
-      excludedDates: jxaObject.getExcludedDates(),
-      status: jxaObject.getStatus(),
-      summary: jxaObject.getSummary(),
-      location: jxaObject.getLocation(),
-      uid: jxaObject.getUid(),
-      url: jxaObject.getUrl(),
+      id: event.getId(),
+      name: event.getName(),
+      body: event.getBody(),
+      description: event.getDescription(),
+      startDate: event.getStartDate(),
+      endDate: event.getEndDate(),
+      alldayEvent: event.getAllDayEvent(),
+      recurrence: event.getRecurrence(),
+      sequence: event.getSequence(),
+      stampDate: event.getStampDate(),
+      excludedDates: event.getExcludedDates(),
+      status: event.getStatus(),
+      summary: event.getSummary(),
+      location: event.getLocation(),
+      uid: event.getUid(),
+      url: event.getUrl(),
       calendar: {
         id: calendar.id(),
         name: calendar.name(),
@@ -112,268 +120,308 @@ export class CalendarService extends SingletonService<CalendarEvent> {
     alldayEvent: boolean,
     options: Partial<Pick<CalendarEvent, 'description' | 'location' | 'url' | 'recurrence'>> = {},
   ): Promise<CalendarEvent> {
-    return run(
-      (calendarName, summary, startDate, endDate, alldayEvent, optionsStr) => {
-        const options = JSON.parse(optionsStr);
-        const app = Application('Calendar');
-        app.includeStandardAdditions = true;
+    try {
+      this.logger.log('Creating event', { calendarName, summary, startDate, endDate, alldayEvent, options });
+      const result = await run(
+        (calendarName, summary, startDate, endDate, alldayEvent, optionsStr) => {
+          const options = JSON.parse(optionsStr);
+          const app = Application('Calendar');
+          app.includeStandardAdditions = true;
 
-        const calendar = app.calendars.whose({ name: calendarName })[0] as JXACalendar;
-        if (!calendar) {
-          throw new Error(`Calendar "${calendarName}" not found`);
-        }
+          const calendar = app.calendars.whose({ name: calendarName })[0] as JXACalendar;
+          if (!calendar) {
+            throw new Error(`Calendar "${calendarName}" not found`);
+          }
 
-        const newEvent = app.Event({
-          summary,
-          startDate,
-          endDate,
-          alldayEvent,
-          description: options.description,
-          location: options.location,
-          url: options.url,
-          recurrence: options.recurrence,
-        }) as JXACalendarEvent;
+          const newEvent = app.Event({
+            summary,
+            startDate,
+            endDate,
+            alldayEvent,
+            description: options.description,
+            location: options.location,
+            url: options.url,
+            recurrence: options.recurrence,
+          }) as JXACalendarEvent;
 
-        calendar.events.push(newEvent);
+          calendar.events.push(newEvent);
 
-        return {
-          id: newEvent.getId(),
-          name: newEvent.getName(),
-          body: newEvent.getBody(),
-          description: newEvent.getDescription(),
-          startDate: newEvent.getStartDate(),
-          endDate: newEvent.getEndDate(),
-          alldayEvent: newEvent.getAllDayEvent(),
-          recurrence: newEvent.getRecurrence(),
-          sequence: newEvent.getSequence(),
-          stampDate: newEvent.getStampDate(),
-          excludedDates: newEvent.getExcludedDates(),
-          status: newEvent.getStatus(),
-          summary: newEvent.getSummary(),
-          location: newEvent.getLocation(),
-          uid: newEvent.getUid(),
-          url: newEvent.getUrl(),
-          calendar: {
-            id: calendar.id(),
-            name: calendar.name(),
-          },
-        };
-      },
-      calendarName,
-      summary,
-      startDate,
-      endDate,
-      alldayEvent,
-      JSON.stringify(options),
-    );
+          return {
+            id: newEvent.getId(),
+            name: newEvent.getName(),
+            body: newEvent.getBody(),
+            description: newEvent.getDescription(),
+            startDate: newEvent.getStartDate(),
+            endDate: newEvent.getEndDate(),
+            alldayEvent: newEvent.getAllDayEvent(),
+            recurrence: newEvent.getRecurrence(),
+            sequence: newEvent.getSequence(),
+            stampDate: newEvent.getStampDate(),
+            excludedDates: newEvent.getExcludedDates(),
+            status: newEvent.getStatus(),
+            summary: newEvent.getSummary(),
+            location: newEvent.getLocation(),
+            uid: newEvent.getUid(),
+            url: newEvent.getUrl(),
+            calendar: {
+              id: calendar.id(),
+              name: calendar.name(),
+            },
+          };
+        },
+        calendarName,
+        summary,
+        startDate,
+        endDate,
+        alldayEvent,
+        JSON.stringify(options),
+      ) as CalendarEvent;
+      this.logger.log('Created event', result);
+      return result;
+    } catch (error) {
+      await this.logger.logError(error, 'Failed to create event');
+      throw error;
+    }
   }
 
   async listEvents(filter?: CalendarEventFilter): Promise<CalendarEvent[]> {
-    return run((filterStr) => {
-      const filter = filterStr ? JSON.parse(filterStr) : {};
-      const app = Application('Calendar');
-      app.includeStandardAdditions = true;
+    try {
+      this.logger.log('Listing events', { filter });
+      const result = await run((filterStr) => {
+        const filter = filterStr ? JSON.parse(filterStr) : {};
+        const app = Application('Calendar');
+        app.includeStandardAdditions = true;
 
-      let calendars: JXACalendar[];
-      if (filter.calendarId || filter.calendarName) {
-        calendars = app.calendars().filter((c: JXACalendar) => {
-          if (filter.calendarId && c.id() !== filter.calendarId) {
-            return false;
-          }
-          if (filter.calendarName && c.name() !== filter.calendarName) {
-            return false;
-          }
-          return true;
-        });
-      } else {
-        calendars = app.calendars();
-      }
+        let calendars: JXACalendar[];
+        if (filter.calendarId || filter.calendarName) {
+          calendars = app.calendars().filter((c: JXACalendar) => {
+            if (filter.calendarId && c.id() !== filter.calendarId) {
+              return false;
+            }
+            if (filter.calendarName && c.name() !== filter.calendarName) {
+              return false;
+            }
+            return true;
+          });
+        } else {
+          calendars = app.calendars();
+        }
 
-      const allEvents = calendars.map((calendar) => calendar.events()).flat();
-      
-      return allEvents
-        .filter((event: JXACalendarEvent) => {
-          if (filter.name && !event.getName().toLowerCase().includes(filter.name.toLowerCase())) {
-            return false;
-          }
-          if (filter.body && !event.getBody().toLowerCase().includes(filter.body.toLowerCase())) {
-            return false;
-          }
-          if (filter.startAfter && event.getStartDate() < new Date(filter.startAfter)) {
-            return false;
-          }
-          if (filter.startBefore && event.getStartDate() > new Date(filter.startBefore)) {
-            return false;
-          }
-          if (filter.endAfter && event.getEndDate() < new Date(filter.endAfter)) {
-            return false;
-          }
-          if (filter.endBefore && event.getEndDate() > new Date(filter.endBefore)) {
-            return false;
-          }
-          if (filter.status && event.getStatus() !== filter.status) {
-            return false;
-          }
-          if (filter.location && !event.getLocation().toLowerCase().includes(filter.location.toLowerCase())) {
-            return false;
-          }
-          return true;
-        })
-        .map((event: JXACalendarEvent) => ({
-          id: event.getId(),
-          name: event.getName(),
-          body: event.getBody(),
-          description: event.getDescription(),
-          startDate: event.getStartDate(),
-          endDate: event.getEndDate(),
-          alldayEvent: event.getAllDayEvent(),
-          recurrence: event.getRecurrence(),
-          sequence: event.getSequence(),
-          stampDate: event.getStampDate(),
-          excludedDates: event.getExcludedDates(),
-          status: event.getStatus(),
-          summary: event.getSummary(),
-          location: event.getLocation(),
-          uid: event.getUid(),
-          url: event.getUrl(),
-          calendar: {
-            id: event.calendar().id(),
-            name: event.calendar().name(),
-          },
-        }));
-    }, filter ? JSON.stringify(filter) : undefined);
+        const allEvents = calendars.map((calendar) => calendar.events()).flat();
+        
+        return allEvents
+          .filter((event: JXACalendarEvent) => {
+            if (filter.name && !event.getName().toLowerCase().includes(filter.name.toLowerCase())) {
+              return false;
+            }
+            if (filter.body && !event.getBody().toLowerCase().includes(filter.body.toLowerCase())) {
+              return false;
+            }
+            if (filter.startAfter && event.getStartDate() < new Date(filter.startAfter)) {
+              return false;
+            }
+            if (filter.startBefore && event.getStartDate() > new Date(filter.startBefore)) {
+              return false;
+            }
+            if (filter.endAfter && event.getEndDate() < new Date(filter.endAfter)) {
+              return false;
+            }
+            if (filter.endBefore && event.getEndDate() > new Date(filter.endBefore)) {
+              return false;
+            }
+            if (filter.status && event.getStatus() !== filter.status) {
+              return false;
+            }
+            if (filter.location && !event.getLocation().toLowerCase().includes(filter.location.toLowerCase())) {
+              return false;
+            }
+            return true;
+          })
+          .map((event: JXACalendarEvent) => ({
+            id: event.getId(),
+            name: event.getName(),
+            body: event.getBody(),
+            description: event.getDescription(),
+            startDate: event.getStartDate(),
+            endDate: event.getEndDate(),
+            alldayEvent: event.getAllDayEvent(),
+            recurrence: event.getRecurrence(),
+            sequence: event.getSequence(),
+            stampDate: event.getStampDate(),
+            excludedDates: event.getExcludedDates(),
+            status: event.getStatus(),
+            summary: event.getSummary(),
+            location: event.getLocation(),
+            uid: event.getUid(),
+            url: event.getUrl(),
+            calendar: {
+              id: event.calendar().id(),
+              name: event.calendar().name(),
+            },
+          }));
+      }, filter ? JSON.stringify(filter) : undefined) as CalendarEvent[];
+      this.logger.log('Listed events', { count: result.length });
+      return result;
+    } catch (error) {
+      await this.logger.logError(error, 'Failed to list events');
+      throw error;
+    }
   }
 
   async updateEvent(
     id: string,
     updates: Partial<Omit<CalendarEvent, 'id' | 'sequence' | 'stampDate' | 'uid' | 'calendar'>>,
   ): Promise<CalendarEvent> {
-    return run(
-      (id, updatesStr) => {
-        const updates = JSON.parse(updatesStr);
-        const app = Application('Calendar');
-        app.includeStandardAdditions = true;
+    try {
+      this.logger.log('Updating event', { id, updates });
+      const result = await run(
+        (id, updatesStr) => {
+          const updates = JSON.parse(updatesStr);
+          const app = Application('Calendar');
+          app.includeStandardAdditions = true;
 
-        const event = app
-          .calendars()
-          .map((c: JXACalendar) => c.events())
-          .flat()
-          .find((e: JXACalendarEvent) => e.getId() === id);
+          const event = app
+            .calendars()
+            .map((c: JXACalendar) => c.events())
+            .flat()
+            .find((e: JXACalendarEvent) => e.getId() === id);
 
-        if (!event) {
-          throw new Error(`Event with id ${id} not found`);
-        }
+          if (!event) {
+            throw new Error(`Event with id ${id} not found`);
+          }
 
-        // Apply updates
-        if (updates.name !== undefined) event.name = updates.name;
-        if (updates.body !== undefined) event.body = updates.body;
-        if (updates.description !== undefined) event.description = updates.description;
-        if (updates.startDate !== undefined) event.startDate = new Date(updates.startDate);
-        if (updates.endDate !== undefined) event.endDate = new Date(updates.endDate);
-        if (updates.alldayEvent !== undefined) event.alldayEvent = updates.alldayEvent;
-        if (updates.recurrence !== undefined) event.recurrence = updates.recurrence;
-        if (updates.status !== undefined) event.status = updates.status;
-        if (updates.summary !== undefined) event.summary = updates.summary;
-        if (updates.location !== undefined) event.location = updates.location;
-        if (updates.url !== undefined) event.url = updates.url;
+          // Apply updates
+          if (updates.name !== undefined) event.name = updates.name;
+          if (updates.body !== undefined) event.body = updates.body;
+          if (updates.description !== undefined) event.description = updates.description;
+          if (updates.startDate !== undefined) event.startDate = new Date(updates.startDate);
+          if (updates.endDate !== undefined) event.endDate = new Date(updates.endDate);
+          if (updates.alldayEvent !== undefined) event.alldayEvent = updates.alldayEvent;
+          if (updates.recurrence !== undefined) event.recurrence = updates.recurrence;
+          if (updates.status !== undefined) event.status = updates.status;
+          if (updates.summary !== undefined) event.summary = updates.summary;
+          if (updates.location !== undefined) event.location = updates.location;
+          if (updates.url !== undefined) event.url = updates.url;
 
-        return {
-          id: event.getId(),
-          name: event.getName(),
-          body: event.getBody(),
-          description: event.getDescription(),
-          startDate: event.getStartDate(),
-          endDate: event.getEndDate(),
-          alldayEvent: event.getAllDayEvent(),
-          recurrence: event.getRecurrence(),
-          sequence: event.getSequence(),
-          stampDate: event.getStampDate(),
-          excludedDates: event.getExcludedDates(),
-          status: event.getStatus(),
-          summary: event.getSummary(),
-          location: event.getLocation(),
-          uid: event.getUid(),
-          url: event.getUrl(),
-          calendar: {
-            id: event.calendar().id(),
-            name: event.calendar().name(),
-          },
-        };
-      },
-      id,
-      JSON.stringify(updates),
-    );
+          return {
+            id: event.getId(),
+            name: event.getName(),
+            body: event.getBody(),
+            description: event.getDescription(),
+            startDate: event.getStartDate(),
+            endDate: event.getEndDate(),
+            alldayEvent: event.getAllDayEvent(),
+            recurrence: event.getRecurrence(),
+            sequence: event.getSequence(),
+            stampDate: event.getStampDate(),
+            excludedDates: event.getExcludedDates(),
+            status: event.getStatus(),
+            summary: event.getSummary(),
+            location: event.getLocation(),
+            uid: event.getUid(),
+            url: event.getUrl(),
+            calendar: {
+              id: event.calendar().id(),
+              name: event.calendar().name(),
+            },
+          };
+        },
+        id,
+        JSON.stringify(updates),
+      ) as CalendarEvent;
+      this.logger.log('Updated event', result);
+      return result;
+    } catch (error) {
+      await this.logger.logError(error, 'Failed to update event');
+      throw error;
+    }
   }
 
   async findConflicts(startDate: Date, endDate: Date, calendarNames?: string[]): Promise<CalendarEvent[]> {
-    return run(
-      (startDate, endDate, calendarNamesStr) => {
-        const calendarNames = calendarNamesStr ? JSON.parse(calendarNamesStr) : undefined;
-        const app = Application('Calendar');
-        app.includeStandardAdditions = true;
+    try {
+      this.logger.log('Finding conflicts', { startDate, endDate, calendarNames });
+      const result = await run(
+        (startDate, endDate, calendarNamesStr) => {
+          const calendarNames = calendarNamesStr ? JSON.parse(calendarNamesStr) : undefined;
+          const app = Application('Calendar');
+          app.includeStandardAdditions = true;
 
-        let calendars: JXACalendar[];
-        if (calendarNames && calendarNames.length > 0) {
-          calendars = app.calendars().filter((c: JXACalendar) => calendarNames.includes(c.name()));
-        } else {
-          calendars = app.calendars();
-        }
+          let calendars: JXACalendar[];
+          if (calendarNames && calendarNames.length > 0) {
+            calendars = app.calendars().filter((c: JXACalendar) => calendarNames.includes(c.name()));
+          } else {
+            calendars = app.calendars();
+          }
 
-        const allEvents = calendars
-          .map((calendar) => calendar.events())
-          .flat()
-          .filter((event: JXACalendarEvent) => {
-            const eventStart = event.getStartDate();
-            const eventEnd = event.getEndDate();
-            return (
-              event.getStatus() !== 'cancelled' &&
-              ((eventStart >= startDate && eventStart < endDate) || // Event starts during the period
-                (eventEnd > startDate && eventEnd <= endDate) || // Event ends during the period
-                (eventStart <= startDate && eventEnd >= endDate)) // Event spans the entire period
-            );
-          });
+          const allEvents = calendars
+            .map((calendar) => calendar.events())
+            .flat()
+            .filter((event: JXACalendarEvent) => {
+              const eventStart = event.getStartDate();
+              const eventEnd = event.getEndDate();
+              return (
+                event.getStatus() !== 'cancelled' &&
+                ((eventStart >= startDate && eventStart < endDate) || // Event starts during the period
+                  (eventEnd > startDate && eventEnd <= endDate) || // Event ends during the period
+                  (eventStart <= startDate && eventEnd >= endDate)) // Event spans the entire period
+              );
+            });
 
-        return allEvents.map((event: JXACalendarEvent) => ({
-          id: event.getId(),
-          name: event.getName(),
-          body: event.getBody(),
-          description: event.getDescription(),
-          startDate: event.getStartDate(),
-          endDate: event.getEndDate(),
-          alldayEvent: event.getAllDayEvent(),
-          recurrence: event.getRecurrence(),
-          sequence: event.getSequence(),
-          stampDate: event.getStampDate(),
-          excludedDates: event.getExcludedDates(),
-          status: event.getStatus(),
-          summary: event.getSummary(),
-          location: event.getLocation(),
-          uid: event.getUid(),
-          url: event.getUrl(),
-          calendar: {
-            id: event.calendar().id(),
-            name: event.calendar().name(),
-          },
-        }));
-      },
-      startDate,
-      endDate,
-      calendarNames ? JSON.stringify(calendarNames) : undefined,
-    );
+          return allEvents.map((event: JXACalendarEvent) => ({
+            id: event.getId(),
+            name: event.getName(),
+            body: event.getBody(),
+            description: event.getDescription(),
+            startDate: event.getStartDate(),
+            endDate: event.getEndDate(),
+            alldayEvent: event.getAllDayEvent(),
+            recurrence: event.getRecurrence(),
+            sequence: event.getSequence(),
+            stampDate: event.getStampDate(),
+            excludedDates: event.getExcludedDates(),
+            status: event.getStatus(),
+            summary: event.getSummary(),
+            location: event.getLocation(),
+            uid: event.getUid(),
+            url: event.getUrl(),
+            calendar: {
+              id: event.calendar().id(),
+              name: event.calendar().name(),
+            },
+          }));
+        },
+        startDate,
+        endDate,
+        calendarNames ? JSON.stringify(calendarNames) : undefined,
+      ) as CalendarEvent[];
+      this.logger.log('Found conflicts', { count: result.length });
+      return result;
+    } catch (error) {
+      await this.logger.logError(error, 'Failed to find conflicts');
+      throw error;
+    }
   }
 
   async listCalendars(): Promise<Calendar[]> {
-    return run(() => {
-      const app = Application('Calendar');
-      app.includeStandardAdditions = true;
+    try {
+      this.logger.log('Listing calendars');
+      const result = await run(() => {
+        const app = Application('Calendar');
+        app.includeStandardAdditions = true;
 
-      return app.calendars().map((calendar: JXACalendar) => ({
-        id: calendar.id(),
-        name: calendar.name(),
-        body: calendar.description(),
-        description: calendar.description(),
-        writable: calendar.writable(),
-      }));
-    });
+        return app.calendars().map((calendar: JXACalendar) => ({
+          id: calendar.id(),
+          name: calendar.name(),
+          body: calendar.description(),
+          description: calendar.description(),
+          writable: calendar.writable(),
+        }));
+      }) as Calendar[];
+      this.logger.log('Listed calendars', { count: result.length });
+      return result;
+    } catch (error) {
+      await this.logger.logError(error, 'Failed to list calendars');
+      throw error;
+    }
   }
 }

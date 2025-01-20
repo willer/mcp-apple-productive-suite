@@ -58,7 +58,12 @@ export function convertToDomainObject<T extends BaseObject>(jxaObject: JXAObject
 export abstract class SingletonService<T> {
   private static _instances = new Map<string, SingletonService<unknown>>();
 
-  constructor() {}
+  constructor() {
+    const name = this.constructor.name;
+    if (SingletonService._instances.has(name)) {
+      throw new Error(`${name} is a singleton. Use getInstance() instead of new.`);
+    }
+  }
 
   public static getInstance<S extends SingletonService<unknown>>(this: new () => S): S {
     const name = this.name;
@@ -77,12 +82,10 @@ export abstract class SingletonService<T> {
  */
 export class Logger {
   private static instance: Logger;
-  private logFile: string;
   private debugMode: boolean;
 
   private constructor() {
-    this.logFile = 'mcp-apple-suite.log';
-    this.debugMode = process.env.DEBUG === 'true';
+    this.debugMode = true; // Always enable debug mode for server logging
   }
 
   public static getInstance(): Logger {
@@ -96,45 +99,20 @@ export class Logger {
     this.debugMode = enabled;
   }
 
-  public setLogFile(filename: string): void {
-    this.logFile = filename;
-  }
-
   public async log(message: string, data?: unknown): Promise<void> {
     if (!this.debugMode) return;
 
     const timestamp = new Date().toISOString();
     const logMessage = `${timestamp}: ${message}${data ? '\nData: ' + JSON.stringify(data, null, 2) : ''}`;
-
-    // Log to console
-    console.log(logMessage);
-
-    // Log to file
-    await run((logMessage: string, logFile: string) => {
-      const app = Application('System Events');
-      app.includeStandardAdditions = true;
-      
-      try {
-        app.doShellScript(`echo "${logMessage}" >> "$HOME/Library/Logs/${logFile}"`);
-      } catch (error) {
-        console.error('Failed to write to log file:', error);
-      }
-    }, logMessage, this.logFile);
-
-    // For very large data structures, output to TextEdit
-    if (data && JSON.stringify(data).length > 1000) {
-      await run((data: unknown) => {
-        const app = Application('TextEdit');
-        app.activate();
-        const doc = app.Document().make();
-        doc.text = JSON.stringify(data, null, 2);
-      }, data);
-    }
+    console.error(logMessage);
   }
 
   public async logError(error: unknown, context?: string): Promise<void> {
     const errorMessage = error instanceof Error ? error.message : String(error);
     const fullMessage = context ? `${context}: ${errorMessage}` : errorMessage;
-    await this.log('ERROR: ' + fullMessage, error);
+    console.error(`${new Date().toISOString()}: ERROR: ${fullMessage}`);
+    if (error instanceof Error && error.stack) {
+      console.error(error.stack);
+    }
   }
 } 

@@ -70,6 +70,20 @@ npm run test:manual:calendar   # Test only Calendar
 npm run dev           # Run TypeScript compiler and unit tests in watch mode
 ```
 
+### Debugging
+
+To enable debug mode and get detailed logs about JXA operations:
+
+```bash
+DEBUG=true npm run dev     # For development
+DEBUG=true npm start      # For production
+```
+
+Logs will be written to:
+- Console output
+- `$HOME/Library/Logs/mcp-apple-suite.log`
+- For large data structures, a new TextEdit document will be opened
+
 ### Code Quality
 
 ```bash

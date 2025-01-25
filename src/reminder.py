@@ -5,7 +5,8 @@ from ScriptingBridge import SBApplication
 import json
 import sys
 import logging
-from subprocess import Popen, DEVNULL
+from subprocess import Popen, DEVNULL, PIPE
+import tempfile
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -22,18 +23,43 @@ class RemindersService:
             default_list = self.app.defaultList()
             if not default_list:
                 raise RuntimeError("No default list found")
-
-            # Create a new reminder using a simple AppleScript
-            script = f'tell application "Reminders" to tell list "{default_list.name()}" to make new reminder with properties {{name:"{name}", body:"{body}"}}'
             
-            # Execute the AppleScript in the background
-            process = Popen(['osascript', '-e', script], stdout=DEVNULL, stderr=DEVNULL)
+            logger.debug("Getting default list: %s", default_list.name())
+            reminders = default_list.reminders()
             
-            # Return a basic success response
+            # Create reminder directly through Scripting Bridge
+            reminder = self.app.classForScriptingClass_("reminder").alloc().init()
+            
+            # Get the current count of reminders
+            initial_count = len(reminders)
+            
+            # Add the reminder to the list first
+            reminders.addObject_(reminder)
+            
+            # Then set its properties
+            reminder.setValue_forKey_(name, "name")
+            reminder.setValue_forKey_(body, "body")
+            
+            # Verify the reminder was added
+            new_count = len(reminders)
+            if new_count <= initial_count:
+                raise RuntimeError("Failed to add reminder to list")
+            
+            # Verify we can read back the properties
+            if reminder.valueForKey_("name") != name:
+                raise RuntimeError("Failed to set reminder name")
+            
             return {
-                "name": name,
-                "body": body,
-                "status": "creating"
+                "id": reminder.valueForKey_("id"),
+                "name": reminder.valueForKey_("name"),
+                "body": reminder.valueForKey_("body"),
+                "completed": reminder.valueForKey_("completed"),
+                "completionDate": reminder.valueForKey_("completionDate"),
+                "dueDate": reminder.valueForKey_("dueDate"),
+                "alldayDueDate": reminder.valueForKey_("alldayDueDate"),
+                "remindMeDate": reminder.valueForKey_("remindMeDate"),
+                "priority": reminder.valueForKey_("priority"),
+                "flagged": reminder.valueForKey_("flagged")
             }
         except Exception as e:
             logger.error("Failed to create reminder: %s", e)
